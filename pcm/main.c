@@ -6,6 +6,27 @@
 #include <string.h>
 #include <math.h>
 
+void simplest_pcm16le_split(const char* url)
+{
+	FILE* fp = fopen(url, "rb+");
+	FILE* fp1 = fopen("output_l.pcm", "wb+");
+	FILE* fp2 = fopen("output_r.pcm", "wb+");
+
+	unsigned char* sample = malloc(4);
+	while (!feof(fp))
+	{
+		fread(sample, 1, 4, fp);
+		fwrite(sample, 1, 2, fp1);
+		fwrite(sample + 2, 1, 2, fp2);
+	}
+
+	free(sample);
+	fclose(fp);
+	fclose(fp1);
+	fclose(fp2);
+
+}
+
 void simplest_pcm16le_halfvolumeleft(const char* url)
 {
 	FILE* pcm = fopen(url, "rb+");
@@ -209,13 +230,17 @@ void simplest_pcm16le_to_wave(const char* url, int channels, int sample_rate, co
 
 	fclose(fp);
 	fclose(fpout);
+
 }
 
 int main()
 {
+	printf("hello world\n");
 	simplest_pcm16le_halfvolumeleft("../audio/NocturneNo2inEflat_44.1k_s16le.pcm");
 	simplest_pcm16le_doublespeed("../audio/NocturneNo2inEflat_44.1k_s16le.pcm");
 	simplest_pcm16le_to_pcm8("../audio/NocturneNo2inEflat_44.1k_s16le.pcm");
 	simplest_pcm16le_cut_singlechannel("../audio/drum.pcm", 2360, 120);
 	simplest_pcm16le_to_wave("../audio/NocturneNo2inEflat_44.1k_s16le.pcm", 2, 44100, "output_nocturne.wav");
+
+	simplest_pcm16le_split("../audio/NocturneNo2inEflat_44.1k_s16le.pcm");
 }
