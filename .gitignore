@@ -1,2 +1,5 @@
-/pcm/cmake-build-debug/
 .idea
+/pcm/cmake-build-debug/
+/yuv/cmake-build-debug/
+/h264Decoder/cmake-build-debug/
+/h264/cmake-build-debug/
