@@ -5,23 +5,10 @@
 #include "Nalu.h"
 #include <iostream>
 #include "AnnexBReader.h"
+#include "BitStream.h"
 int main()
 {
 	std::cout << "hello world" << std::endl;
-
-	FILE* fp = fopen("../video/demo_video_176x144_baseline.h264", "rb");
-	int bufLen = 1024;
-
-	int count = 0;
-	while (true)
-	{
-		uint8_t* buf = (uint8_t*)malloc(bufLen);
-		size_t n = fread(buf, 1, bufLen, fp);
-		if (n <= 0)
-			break;
-		count++;
-	}
-	std::cout << count << std::endl;
 
 	AnnexBReader reader("../video/demo_video_176x144_baseline.h264");
 	int ret = reader.Open();
@@ -34,14 +21,39 @@ int main()
 	int num = 0;
 	while (true)
 	{
+		++num;
 		Nalu nalu;
 		ret = reader.ReadNalu(nalu);
 		if (ret < 0)
 			break;
 
-		printf("num:[%d],NaluSize:[%d] Nalu Type \n", ++num, nalu.len);
+		printf("num:[%d],NaluSize:[%d] ", ++num, nalu.len);
+
+		EBSP ebsp;
+		ret = nalu.GetEBSP(ebsp);
+		//printf("ebsp len:[%d] ", ebsp.len);
+		//printf("ebsp begin 4 :[%d %d %d %d] ", ebsp.buf[0], ebsp.buf[1], ebsp.buf[2], ebsp.buf[3]);
+
+		RBSP rbsp;
+		ebsp.GetRBSP(rbsp);
+		printf("rbsp len:[%d] ", rbsp.len);
+
+		nalu.rbsp = rbsp;
+		nalu.rbsp.len = rbsp.len;
+		nalu.rbsp.buf = (uint8_t*)malloc(nalu.rbsp.len);
+		memcpy(nalu.rbsp.buf, rbsp.buf, nalu.rbsp.len);
+		nalu.ParseHeader();
+		printf("header forbidden:[%d] ref_idc:[%d] unit_type:[%d]\n",
+			nalu.forbidden_bit,
+			nalu.nal_ref_idc,
+			nalu.nal_unit_type);
 
 	}
+
+	uint8_t temp = 20;
+	BitStream bitStream(&temp, 7);
+	int r = bitStream.ReadSE();
+	std::cout << r << std::endl;
 	reader.Close();
 	std::cout << "end" << std::endl;
 }

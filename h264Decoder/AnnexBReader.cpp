@@ -49,6 +49,7 @@ int AnnexBReader::ReadNalu(Nalu& nalu)
 		bool isStartCodeBegin = CheckStartCode(startCodeLen, this->buffer, this->bufferLen);
 		if (!isStartCodeBegin)
 			break;
+		nalu.startCodeLen = startCodeLen;
 
 		int endPos = -1;
 		//偏移两位，避免读到开头的startCode
@@ -72,7 +73,6 @@ int AnnexBReader::ReadNalu(Nalu& nalu)
 			this->buffer = newBuf;
 			this->bufferLen = this->bufferLen - endPos;
 
-
 			return 0;
 		}
 		else
@@ -93,7 +93,6 @@ int AnnexBReader::ReadNalu(Nalu& nalu)
 }
 int AnnexBReader::ReadFromFile()
 {
-	static int num = 0;
 	int bufLen = 1024;
 	uint8_t* buf = (uint8_t*)malloc(bufLen);
 	size_t n = fread(buf, 1, bufLen, this->f);
@@ -112,7 +111,6 @@ int AnnexBReader::ReadFromFile()
 	}
 
 	free(buf);
-	printf("%d\n", ++num);
 	return n;
 }
 
