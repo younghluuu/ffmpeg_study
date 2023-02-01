@@ -12,6 +12,7 @@ class RBSP
 	RBSP();
 	~RBSP();
 
+	RBSP& operator=(const RBSP& rbsp);
 
  public:
 	int len;

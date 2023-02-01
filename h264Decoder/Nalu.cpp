@@ -25,7 +25,7 @@ Nalu::~Nalu()
 	}
 }
 
-int Nalu::GetEBSP(EBSP& ebsp)
+int Nalu::GetEBSP(EBSP& ebsp) const
 {
 	ebsp.len = this->len - this->startCodeLen;
 	ebsp.buf = (uint8_t*)malloc(ebsp.len);
@@ -39,4 +39,56 @@ int Nalu::ParseHeader()
 	this->nal_ref_idc = (header >> 5) & 0x03;
 	this->nal_unit_type = header & 0x1F;
 	return 0;
+}
+int Nalu::ParseRBSP()
+{
+	EBSP ebsp;
+	this->GetEBSP(ebsp);
+	return ebsp.GetRBSP(this->rbsp);
+}
+int Nalu::Parse()
+{
+	return 0;
+}
+Nalu::Nalu(const Nalu& nalu)
+{
+	this->len = nalu.len;
+	this->buf = (uint8_t*)malloc(this->len);
+	memcpy(this->buf, nalu.buf, this->len);
+	this->startCodeLen = nalu.startCodeLen;
+
+	this->rbsp.len = nalu.rbsp.len;
+	this->rbsp.buf = (uint8_t*)malloc(this->rbsp.len);
+	memcpy(this->rbsp.buf, nalu.rbsp.buf, this->rbsp.len);
+
+	this->forbidden_bit = nalu.forbidden_bit;
+	this->nal_ref_idc = nalu.nal_ref_idc;
+	this->nal_unit_type = nalu.nal_unit_type;
+}
+Nalu& Nalu::operator=(const Nalu& nalu)
+{
+	if (&nalu == this)
+		return *this;
+
+	if (this->buf != nullptr)
+	{
+		free(this->rbsp.buf);
+		free(this->buf);
+		this->buf = nullptr;
+	}
+
+	this->len = nalu.len;
+	this->buf = (uint8_t*)malloc(this->len);
+	memcpy(this->buf, nalu.buf, this->len);
+	this->startCodeLen = nalu.startCodeLen;
+
+	this->rbsp.len = nalu.rbsp.len;
+	this->rbsp.buf = (uint8_t*)malloc(this->rbsp.len);
+	memcpy(this->rbsp.buf, nalu.rbsp.buf, this->rbsp.len);
+
+	this->forbidden_bit = nalu.forbidden_bit;
+	this->nal_ref_idc = nalu.nal_ref_idc;
+	this->nal_unit_type = nalu.nal_unit_type;
+
+	return *this;
 }
