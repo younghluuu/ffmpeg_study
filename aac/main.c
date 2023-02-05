@@ -55,7 +55,7 @@ int simplest_aac_parser(char* url)
 	//FILE *myout=fopen("output_log.txt","wb+");
 	FILE* myout = stdout;
 
-	unsigned char* aacframe = (unsigned char*)malloc(1024 * 10);
+	unsigned char* aacframe = (unsigned char*)malloc(1024);
 	unsigned char* aacbuffer = (unsigned char*)malloc(1024 * 1024);
 
 	FILE* ifile = fopen(url, "rb");

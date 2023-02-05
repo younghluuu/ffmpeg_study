@@ -4,3 +4,4 @@
 /h264Decoder/cmake-build-debug/
 /h264/cmake-build-debug/
 /aac/cmake-build-debug/
+/udp-rtp/cmake-build-debug/
