@@ -3,7 +3,7 @@ project(udp-rtp)
 
 set(CMAKE_C_STANDARD 11)
 
-add_executable(${PROJECT_NAME} main.c)
+add_executable(${PROJECT_NAME} main.c ts.c)
 
 if (WIN32)
     target_link_libraries(${PROJECT_NAME} ws2_32)

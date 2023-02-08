@@ -44,6 +44,13 @@ int Nalu::ParseRBSP()
 {
 	EBSP ebsp;
 	this->GetEBSP(ebsp);
+
+	return ebsp.GetRBSP(this->rbsp);
+}
+int Nalu::ParseRBSP()
+{
+	EBSP ebsp;
+	this->GetEBSP(ebsp);
 	return ebsp.GetRBSP(this->rbsp);
 }
 int Nalu::Parse()

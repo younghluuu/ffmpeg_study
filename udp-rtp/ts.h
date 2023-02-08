@@ -4,6 +4,13 @@
 
 #ifndef UDP_RTP_UDP_RTP_TS_H_
 #define UDP_RTP_UDP_RTP_TS_H_
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#ifdef _WIN32
+#include <winsock2.h>
+#endif
+
 /*
 	TS包固定大小为188字节，分为TS header、Adaptation Field、Payload
 	TS Header固定4个字节；Adaptation Field可能存在也可能不存在，主要作用是给不足188字节的数据做填充；Payload是PES数据。
@@ -21,6 +28,7 @@ typedef struct MPEGTS_FIXED_HEADER_BIT
 	//负载起始标志标识。为1时，表示当前TS包的有效载荷中包含PES或者PSI头的起始位置；
 	//1+[length],最后多了一个point, 在前4个字节之后会有一个调整字节，其的数值为后面调整字段的长度length。因此有效载荷开始的位置应再偏移1+[length]个字节
 	//如果是PSI/SI的话，会多一个point.PointField 指出了 SI、PSI 表头在有效净荷中的具体位置
+	//举个例子，一个PES包可能由多个TS包构成，第一个TS包的负载单元起始指标位才会被置位
 	unsigned payload_unit_start_indicator: 1;
 	//传输优先级标志。1’表明当前TS包的优先级比其他具有相同PID， 但此位没有被置‘1’的TS包高。
 	unsigned transport_priority: 1;
@@ -149,13 +157,6 @@ typedef struct SDT_Program_desc
 //adaptation_field_control为0x1或者0x3时，通常是0x1，而当PES首个包或最后一个包时，可能为0x3。有效荷载
 
 
-typedef struct TS_PAT_Program
-{
-	unsigned program_number: 16;
-	unsigned reserved: 3;
-	unsigned program_map_PID: 13;
-} TS_PAT_Program;
-
 //该结构占用12字节，N loop = section_length - 12 .
 //先分析PAT.TS流中会定期出现PAT表。PAT表提供了节目号和对应PMT表格的PID的对应关系。
 //节目关联表(PAT Program Association Table)是数字电视系统中节目指示的根节点。
@@ -171,32 +172,99 @@ typedef struct PAT
 	unsigned reserved_1: 3;
 	//表示从下一个字段开始到CRC32(含) [下一个字段，CRC_32]，闭空间。之间有用的字节数。计算N loop的时候要-12. for ( n = 0; n < packet->section_length - 12; n += 4 )
 	unsigned section_length: 12;
-	//该传输流的ID，区别于一个网络中其它多路复用的流
+
+	//该传输流的ID，区别于一个网络中其它多路复用的流,作为一个标签，该字段指出在网络中与
+	//其它复用流的区别标志，其值由用户定义。
 	unsigned transport_stream_id: 16;
 	unsigned reserved_2: 2;
 	//范围0-31，表示PAT的版本号
 	unsigned version_number: 5;
-	//当前未来标志，表示当前有效还是未来有效，一般是0
+	//当前未来标志，表示当前有效还是未来有效，置0时，表明该传送的表分段不能使用，下一个表分段才有效。
 	unsigned current_next_indicator: 1;
 	//分段的号码，表示当前是分段的第几段。一般为0
 	// PAT可能分为多段传输，第一段为00，以后每个分段加1，最多可能有256个分段
 	unsigned section_number: 8;
-	//最后一个分段的号码
+	//最后一个分段的号码.表明最后一个分段号，同时表明该PAT的最大分段数目。一般，一个PAT表由一个TS包传送
 	unsigned last_section_number: 8;
 
 	//单独存储NIT
+	//NIT表的PID值。
 	unsigned program_number: 16;
 	unsigned reserved_3: 3; // 保留位
 	unsigned network_PID: 13; //网络信息表（NIT）的PID,节目号为0时对应的PID为network_PID
 
 	//只存储PMT
+	//PMT表的PID值
 	//program_number == 0 then NIT_PID else PMT_PID
-	struct TS_PAT_Program* N_loop;
-	unsigned int N_loop_len;
+	struct TS_PAT_Program* program;
+	unsigned int program_len;
 
 	//校验码
 	unsigned CRC_32: 32;
 } PAT;
+
+typedef struct TS_PAT_Program
+{
+	//节目的编号
+	unsigned program_number: 16;
+	unsigned reserved: 3;
+	//PMT表的PID
+	unsigned program_map_PID: 13;
+} TS_PAT_Program;
+
+typedef struct PMT
+{
+	//标识字段。指明了一个TS中PSI分段的内容是节目关联分段、条件访问分段、TS节目映射分段。（PAT/CAT/PMT）
+	//固定为0x02, 表示PMT表
+	unsigned table_id: 8;
+	unsigned section_syntax_indicator: 1; //固定为0x01
+	unsigned reserved_1: 3; //0x03
+	//指示分段的字节数，长度等于该 字段之后到 CRC32 （ 包括在内）的字节数。
+	unsigned section_length: 12;
+
+	unsigned program_number: 16;// 指出该节目对应于可应用的Program map PID
+	unsigned reserved_2: 2; //0x03
+	unsigned version_number: 5; //指出TS流中Program map section的版本号
+	//当该位置1时，当前传送的Program map section可用；
+	unsigned current_next_indicator: 1;
+	//分段的号码，表示当前是分段的第几段。一般为0
+	//固定为0x00
+	unsigned section_number: 8;
+	//最后一个分段的号码.表明最后一个分段号，同时表明该PAT的最大分段数目。
+	//固定为0x00
+	unsigned last_section_number: 8;
+
+	unsigned reserved_3: 3; //0x07
+	//指明TS包的PID值，该TS包含有PCR域，该PCR值对应于由节目号指定的对应节目。
+	//如果对于私有数据流的节目定义与PCR无关，这个域的值将为0x1FFF。
+	unsigned PCR_PID: 13;
+	unsigned reserved_4: 4; //预留为0x0F
+	//表明跟随其后的对节目信息描述的字节数，也就是第一个N loop descriptors的字节数。
+	unsigned program_info_length: 12;
+
+	struct PMT_STREAM* pmt_stream;
+	unsigned int pmt_stream_len;
+
+	//在CEDARX代码中仅对DVB的场景下作校验。
+	//校验码
+	unsigned CRC_32: 32;
+} PMT;
+
+typedef struct PMT_STREAM
+{
+	//指示特定PID的节目元素包的类型。该处PID由elementary PID指定
+	//表明PES流的类型。譬如，0x01表明是MPEG-1视频，0X03表明是MPEG-1音频。
+	//0X1b H.254 0X0F AAC
+	unsigned stream_type: 8;
+	unsigned reserved_1: 3;
+	//该域指示TS包的PID值。这些TS包含有相关的节目元素
+	//表明该负载有该PES流的TS包的PID值
+	unsigned elementary_PID: 13;
+	unsigned reserved_2: 4;
+	//表明跟随其后的描述相关节目元素的字节数，也就是第二个N loop descriptors的字节数。
+	//前两位bit为00。该域指示跟随其后的描述相关节目元素的byte数
+	unsigned ES_info_length: 12;
+} PMT_STREAM;
 
 //PES包非定长，音频的PES包小于等于64K，视频的一般为一帧一个PES包。
 //一帧图象的PES包通常要由许多个TS包来传输。
@@ -210,149 +278,56 @@ typedef struct PES
 	unsigned stream_id: 8;
 	//16位，用于存储后面pes数据的长度。
 	//0表示长度不限制，只有视频数据长度会超过0xffff。
-	unsigned PES_packet_length: 16;
+	unsigned packet_length: 16;
+
+	unsigned reserved_0: 2;
+	unsigned scrambling_control: 2;
+	unsigned priority: 1;
+	unsigned data_alignment_indicator: 1;
+	unsigned copyright: 1;
+	unsigned original_or_copy: 1;
+
+	/*
+	 * 0x00	PES包头中既无任何PTS字段也无任何DTS字段存在。
+	 * 0x01	禁用
+	 * 0x02	PES包头中PTS字段存在。
+	 * 0x03	PES包头中PTS字段和DTS字段均存在。
+	 */
+	unsigned pts_dts_flags: 2;
+	//0:指示无任何ESCR字段存在
+	//1:指示PES包头中ESCR基准字段和ESCR扩展字段均存在
+	unsigned escr_flag: 1;
+	//置于‘1’时指示PES包头中ES_rate 字段存在。置于‘0’时指示无任何 ES_rate 字段存在
+	unsigned es_rate_flag: 1;
+	//置于‘1’时指示8比特特技方式字段存在。置于‘0’时指示此字段不存在
+	unsigned dsm_trick_mode_flag: 1;
+	//置于‘1’时指示additional_copy_info 存在。置于‘0’时指示此字段不存在
+	unsigned additional_copy_info_flag: 1;
+	//置于‘1’时指示PES包中CRC字段存在。置于‘0’时指示此字段不存在
+	unsigned crc_flag: 1;
+	//置于‘1’时指示PES包头中扩展字段存在。置于‘0’时指示此字段不存在
+	unsigned extension_flag: 1;
+
+	//指示在此PES包头中包含的由任选字段和任意填充字节所占据的字节总数。
+	//任选字段的存在由前导 PES_header_data_length 字段的字节来指定
+	unsigned header_data_length: 8;
+
+	unsigned char payload_offset;
+
+	unsigned pts_flag: 4;
+	unsigned pts_marker: 3;
+	unsigned pts: 33;
+
 } PES;
 
-int parseTS(unsigned char* rtpPayload, TS_PACKET* tsPacket)
-{
-	tsPacket->sync_byte = rtpPayload[0];
-	tsPacket->transport_error_indicator = rtpPayload[1] >> 7;
-	tsPacket->payload_unit_start_indicator = (rtpPayload[1] & 0x40) >> 6;
-	tsPacket->transport_priority = (rtpPayload[1] & 0x20) >> 5;
-	tsPacket->PID = ((rtpPayload[1] & 0x1F) << 8) | rtpPayload[2];
-	tsPacket->scrambling_control = rtpPayload[3] >> 6;
-	tsPacket->adaptation_field_control = (rtpPayload[3] & 0x30) >> 4;
-	tsPacket->continuity_counter = rtpPayload[3] & 0x0F;
+int parseTS(unsigned char* rtpPayload, TS_PACKET* tsPacket);
 
-	if (tsPacket->sync_byte != 0x47 || tsPacket->transport_error_indicator == 1)
-	{
-		perror(
-			"rtp payload = mp2t(33) but sync_code != 0x47 or transport_error_indicator == 1");
-		return -1;
-	}
-	//预留
-	if (tsPacket->adaptation_field_control == 0)
-	{
-		perror("adaptation_field_control == 0");
-		return -1;
-	}
+int parsePES(unsigned char* payload, unsigned char type);
 
-	//查找荷载
-	//先跳过TS头
-	unsigned int payloadOffset = 4;
+int parseSDT(TS_PACKET* tsPacket);
 
-	//有调节字段，跳过调节字段
-	if (tsPacket->adaptation_field_control == 3)
-	{
-		printf("TS Package has adaptation field\n");
-		unsigned char adaptation_field_length = 0;
-		memcpy(&adaptation_field_length, rtpPayload + payloadOffset, 1);
-		printf("adaptation_field_length:[%d]\n", adaptation_field_length);
-		//还要加上第一个调节字节+1
-		payloadOffset = payloadOffset + adaptation_field_length + 1;
-	}
+int parsePAT(unsigned char* payload, PAT* pPat);
 
-	tsPacket->payload = rtpPayload + payloadOffset;
-
-	//荷载长度
-	tsPacket->payloadLen = 0;
-
-	return 0;
-}
-
-//判断PID是否时PMT
-//PMT在传送流中用于指示组成某一套节目的视频、音频和数据在传送流中的位置，即对应的TS包的PID值，以及每路节目的节目时钟参考（PCR）字段的位置
-
-int parsePES(unsigned char* ts_payload)
-{
-	PES pes;
-	memcpy(&pes, ts_payload, sizeof(pes));
-	if (pes.packet_start_code_prefix == 0x000001)
-	{
-		printf("[PES] | code:[%x] | stream id:[%x] | pes package len:[%d]\n",
-			pes.packet_start_code_prefix,
-			pes.stream_id,
-			pes.PES_packet_length);
-	}
-}
-
-int parseSDT(TS_PACKET* tsPacket)
-{
-	//SDT or BAT
-	SDT sdt = { 0 };
-	memcpy(&sdt, tsPacket->payload, 11);
-	int CRC_32;
-	//-4 ,减去CRC_32，指针移动到CRC_32前
-	memcpy(&CRC_32, tsPacket->payload + sdt.section_length - 4, sizeof(CRC_32));
-	sdt.CRC_32 = CRC_32;
-	//BAT
-	if (sdt.table_id == 0x4a)
-	{
-		printf("BAT\n");
-		return -1;
-	}
-
-
-	//program
-	char* crc_32 = tsPacket->payload + sdt.section_length - 4;
-	tsPacket->payload += 11;
-	//for (int n = 0; n < sdt.section_length - 4 - 8; n += 4)
-	while (crc_32 != tsPacket->payload)
-	{
-		SDT_Program* sdtProgram = malloc(sizeof(SDT_Program));
-		memcpy(sdtProgram, tsPacket->payload, 5);
-		tsPacket->payload += 5;
-
-		for (int i = 0; i < sdtProgram->descriptors_loop_length; ++i)
-		{
-			SDT_Program_desc* sdtProgramDesc = malloc(sizeof(SDT_Program_desc));
-			memcpy(sdtProgramDesc, tsPacket->payload, 4);
-			tsPacket->payload += 4;
-			unsigned char* provider_name = malloc(sdtProgramDesc->Service_provider_name_length);
-			memcpy(provider_name, tsPacket->payload, sdtProgramDesc->Service_provider_name_length);
-			tsPacket->payload += sdtProgramDesc->Service_provider_name_length;
-			sdtProgramDesc->Service_provider_name = provider_name;
-
-			unsigned char service_name_len;
-			memcpy(&service_name_len, tsPacket->payload, 1);
-			tsPacket->payload += 1;
-			sdtProgramDesc->Service_name_length = service_name_len;
-			unsigned char* service_name = malloc(sdtProgramDesc->Service_name_length);
-			memcpy(service_name, tsPacket->payload, sdtProgramDesc->Service_name_length);
-			tsPacket->payload += sdtProgramDesc->Service_name_length;
-			sdtProgramDesc->Service_name = service_name;
-
-			sdtProgram->N_loop[sdtProgram->N_loop_len] = sdtProgramDesc;
-			sdtProgram->N_loop_len++;
-		}
-		sdt.N_loop[sdt.N_loop_len] = sdtProgram;
-		sdt.N_loop_len++;
-	}
-}
-
-int parsePAT(unsigned char* payload, PAT* pPat)
-{
-	memcpy(pPat, payload, 64);
-	pPat->table_id = payload[0];
-	pPat->section_syntax_indicator = payload[1] >> 7;
-	pPat->reserved_1 = (payload[1] & 0x70) >> 4;
-	pPat->section_length = ((payload[1] & 0x000F) << 8) | payload[2];
-	pPat->transport_stream_id = (payload[3] << 8) | payload[4];
-	pPat->reserved_2 = (payload[5] & 0xc0) >> 6;
-	pPat->version_number = (payload[5] & 0x3E) >> 1;
-	pPat->current_next_indicator = payload[5] & 0x01;
-	pPat->section_number = payload[6];
-	pPat->last_section_number = payload[7];
-	unsigned int CRC_32;
-	//+3移动到下一位，-4 ,减去CRC_32，指针移动到CRC_32前
-	memcpy(&CRC_32, payload + 3 + pPat->section_length - 4, sizeof(CRC_32));
-	pPat->CRC_32 = CRC_32;
-	return 0;
-}
-
-int parseES()
-{
-	return 0;
-}
+int parsePMT(unsigned char* payload, PMT* pPMT);
 
 #endif //UDP_RTP_UDP_RTP_TS_H_

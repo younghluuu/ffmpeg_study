@@ -60,6 +60,7 @@ int simplest_udp_parser(int port)
 	int cnt = 0;
 
 	PAT pat = { 0 };
+	PMT pmt = { 0 };
 	while (1)
 	{
 		int pktsize = recvfrom(serSocket, recvData, 1500, 0, (struct sockaddr*)&remoteAddr, &nAddrLen);
@@ -76,15 +77,15 @@ int simplest_udp_parser(int port)
 			continue;
 		}
 
-		fprintf(myout,
+/*		fprintf(myout,
 			"[RTP Pkt] | num:[%d] | pt:[%u] | ts:[%10u] | no:[%5d] | %5d|\n",
 			cnt,
 			rtpPacket.payloadType,
 			rtpPacket.timestamp,
 			rtpPacket.seqNo,
-			rtpPacket.payloadLen);
+			rtpPacket.payloadLen);*/
 
-		fwrite(rtpPacket.payload, 1, rtpPacket.payloadLen, fp1);
+		//fwrite(rtpPacket.payload, 1, rtpPacket.payloadLen, fp1);
 
 		if (rtpPacket.payloadType == 33)
 		{
@@ -97,26 +98,102 @@ int simplest_udp_parser(int port)
 					perror("parseTS error");
 					continue;
 				}
-				printf("TS header | payload_unit:[%x] | PID:[%x] | filed:[%x] | cc:[%d]\n",
+/*				printf("TS header | payload_unit:[%x] | PID:[%x] | filed:[%x] | cc:[%d]\n",
 					tsPacket.payload_unit_start_indicator,
 					tsPacket.PID,
 					tsPacket.adaptation_field_control,
-					tsPacket.continuity_counter);
+					tsPacket.continuity_counter);*/
 
-				switch (tsPacket.PID)
+				if (tsPacket.payload_unit_start_indicator == 1)
 				{
-				case 0:
-					if (tsPacket.payload_unit_start_indicator == 1)
-						tsPacket.payload++;
+					int offset = 0;
+					if (tsPacket.PID == 0)
+					{
+						memcpy(&offset, tsPacket.payload, 1);
+						tsPacket.payload = tsPacket.payload + 1 + offset;
+					}
+
+					for (int j = 0, index = 0; j < pat.program_len; j += 4)
+					{
+						if (tsPacket.PID == pat.program[index].program_map_PID)
+						{
+							memcpy(&offset, tsPacket.payload, 1);
+							tsPacket.payload = tsPacket.payload + 1 + offset;
+							break;
+						}
+						index++;
+					}
+
+				}
+
+
+				//PAT
+				if (tsPacket.PID == 0x00)
+				{
 					parsePAT(tsPacket.payload, &pat);
+					printf("PAT Program |");
+					for (int j = 0, index = 0; j < pat.program_len; j += 4)
+					{
+						printf(" program_num:[%x]  program_map_PID:[%x] \n",
+							pat.program[index].program_number,
+							pat.program[index].program_map_PID);
+						index++;
+					}
+					continue;
+				}
+
+				//PMT
+				for (int j = 0, index = 0; j < pat.program_len; j += 4)
+				{
+					if (pat.program[index].program_map_PID == tsPacket.PID)
+					{
+						parsePMT(tsPacket.payload, &pmt);
+						for (int K = 0, V = 0; K < pmt.pmt_stream_len;)
+						{
+							unsigned char stream_type = pmt.pmt_stream[V].stream_type;
+							unsigned short ele_PID = pmt.pmt_stream[V].elementary_PID;
+							printf("PMT Program | stream_type:[%x]  elementary_PID:[%x] \n",
+								stream_type,
+								ele_PID);
+							K = K + 5 + pmt.pmt_stream[V].ES_info_length;
+							V++;
+						}
+						continue;
+					}
+				}
+
+				/*switch (tsPacket.PID)
+				{
+				case 0x00:
+					parsePAT(tsPacket.payload, &pat);
+					printf("PAT Program |");
+					for (int j = 0, index = 0; j < pat.N_loop_len; j += 4)
+					{
+						printf(" program_num:[%x]  program_map_PID:[%x] \n",
+							pat.N_loop[index].program_number,
+							pat.N_loop[index].program_map_PID);
+						index++;
+					}
+					break;
+				case 0x20:
+					parsePMT(tsPacket.payload, &pmt);
+					printf("PMT Program |");
+					for (int j = 0, index = 0; j < pmt.pmt_stream_len;)
+					{
+						printf(" stream_type:[%x]  elementary_PID:[%x] \n",
+							pmt.pmt_stream[index].stream_type,
+							pmt.pmt_stream[index].elementary_PID);
+						j = j + 4 + pmt.pmt_stream[index].ES_info_length;
+						index++;
+					}
 					break;
 				case 0x11:
-					parseSDT(&tsPacket);
+					//parseSDT(&tsPacket);
 					break;
 				default:
 					//parsePES(tsPacket.payload);
-					parseES();
-				}
+					//parseES();
+				}*/
 			}
 
 		}

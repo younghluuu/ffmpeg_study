@@ -28,6 +28,9 @@ class Nalu
 	uint8_t* buf;
 	int startCodeLen;
 
+	int GetEBSP(EBSP& ebsp);
+
+	int ParseHeader();
 	RBSP rbsp;
 	int forbidden_bit;
 	int nal_ref_idc;
