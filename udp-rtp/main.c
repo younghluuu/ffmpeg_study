@@ -13,7 +13,12 @@ int simplest_udp_parser(int port)
 
 	//FILE *myout=fopen("output_log.txt","wb+");
 	FILE* myout = stdout;
-	FILE* fp1 = fopen("output_dump.ts", "wb+");
+	FILE* fp1 = fopen("./output_dump.h264", "wb+");
+	if (fp1 == NULL)
+	{
+		perror("fp1 open fail");
+		return -1;
+	}
 
 #ifdef _WIN32
 	//≥ı ºªØWSA
@@ -61,6 +66,10 @@ int simplest_udp_parser(int port)
 
 	PAT pat = { 0 };
 	PMT pmt = { 0 };
+	unsigned char streamListSize = 16;
+	STREAM streamList[streamListSize];
+	memset(streamList, 0, streamListSize * sizeof(STREAM));
+	//STREAM* streamList = malloc(streamListSize * sizeof(STREAM));
 	while (1)
 	{
 		int pktsize = recvfrom(serSocket, recvData, 1500, 0, (struct sockaddr*)&remoteAddr, &nAddrLen);
@@ -155,8 +164,92 @@ int simplest_udp_parser(int port)
 							printf("PMT Program | stream_type:[%x]  elementary_PID:[%x] \n",
 								stream_type,
 								ele_PID);
+
+							int k = 0;
+							for (k = 0; k < streamListSize; ++k)
+							{
+								if (streamList[k].PID == ele_PID)
+								{
+									break;
+								}
+							}
+
+							if (k == streamListSize)
+							{
+								STREAM stream = { 0 };
+								stream.PID = ele_PID;
+								for (k = 0; k < streamListSize; ++k)
+								{
+									if (streamList[k].PID == 0)
+									{
+										streamList[k] = stream;
+										break;
+									}
+								}
+								if (k == streamListSize)
+								{
+									printf("streamList full !!!\n");
+									break;
+								}
+							}
 							K = K + 5 + pmt.pmt_stream[V].ES_info_length;
 							V++;
+						}
+						break;
+					}
+				}
+
+				//PES
+				for (int j = 0; j < streamListSize; ++j)
+				{
+					if (streamList[j].PID == tsPacket.PID)
+					{
+						if (tsPacket.payload_unit_start_indicator == 1)
+						{
+							if (streamList[j].buf != NULL)
+							{
+								if (streamList[j].stream_type == 0xe0)
+								{
+									fwrite(streamList[j].buf, 1, streamList[j].bufLen, fp1);
+								}
+								free(streamList[j].buf);
+								streamList[j].buf = NULL;
+							}
+
+							PES pes;
+							ret = parsePES(tsPacket.payload, &pes);
+							if (ret < 0)
+								break;
+							streamList[j].stream_type = pes.stream_id;
+							streamList[j].packet_length = pes.packet_length;
+							streamList[j].continuity_counter = (tsPacket.continuity_counter + 1) % 16;
+							streamList[j].buf = malloc(pes.packet_length);
+
+							memcpy(streamList[j].buf,
+								tsPacket.payload + pes.payload_offset,
+								tsPacket.payloadLen - pes.payload_offset);
+							streamList[j].bufLen = tsPacket.payloadLen - pes.payload_offset;
+						}
+						else
+						{
+							if (streamList[j].continuity_counter == tsPacket.continuity_counter)
+							{
+								if (streamList[j].bufLen + tsPacket.payloadLen > streamList[j].packet_length)
+								{
+									printf("packet size error\n");
+									free(streamList[j].buf);
+									streamList[j].buf = NULL;
+									streamList[j].PID = 0;
+									break;
+								}
+								if (streamList[j].stream_type == 0xe0)
+								{
+									int a = 3;
+								}
+								memcpy(streamList[j].buf + streamList[j].bufLen, tsPacket.payload, tsPacket.payloadLen);
+								streamList[j].bufLen += tsPacket.payloadLen;
+								streamList[j].continuity_counter = (tsPacket.continuity_counter + 1) % 16;
+							}
 						}
 						continue;
 					}
@@ -198,9 +291,12 @@ int simplest_udp_parser(int port)
 
 		}
 		cnt++;
+		if (cnt == 2000)
+			break;
 	}
 
 	//Close
+	fclose(fp1);
 #ifdef _WIN32
 	closesocket(serSocket);
 	WSACleanup();

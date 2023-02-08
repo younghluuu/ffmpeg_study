@@ -13,7 +13,6 @@
 
 /*
 	TS包固定大小为188字节，分为TS header、Adaptation Field、Payload
-	TS Header固定4个字节；Adaptation Field可能存在也可能不存在，主要作用是给不足188字节的数据做填充；Payload是PES数据。
   	TS Header 协议格式如下，协议为 4 byte。
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
    |	sync byte  |T|P|T| 			PID			   |SC |AF |	CC |
@@ -75,7 +74,7 @@ typedef struct TS_PACKET
 	unsigned char continuity_counter;
 
 	unsigned char* payload;
-	int payloadLen;
+	unsigned int payloadLen;
 } TS_PACKET;
 
 //11byte + n loop + 4
@@ -310,24 +309,35 @@ typedef struct PES
 
 	//指示在此PES包头中包含的由任选字段和任意填充字节所占据的字节总数。
 	//任选字段的存在由前导 PES_header_data_length 字段的字节来指定
+	//后面的数据长度
 	unsigned header_data_length: 8;
 
 	unsigned char payload_offset;
 
-	unsigned pts_flag: 4;
-	unsigned pts_marker: 3;
-	unsigned pts: 33;
+	unsigned long long pts: 33;
+	unsigned long long dts: 33;
 
 } PES;
 
 int parseTS(unsigned char* rtpPayload, TS_PACKET* tsPacket);
 
-int parsePES(unsigned char* payload, unsigned char type);
+int parsePES(unsigned char* payload, PES* pes);
 
 int parseSDT(TS_PACKET* tsPacket);
 
 int parsePAT(unsigned char* payload, PAT* pPat);
 
 int parsePMT(unsigned char* payload, PMT* pPMT);
+
+typedef struct STREAM
+{
+	unsigned short PID;
+	unsigned char stream_type;
+	unsigned short packet_length;
+	unsigned char* buf;
+	unsigned short bufLen;
+	unsigned char continuity_counter;
+
+} STREAM;
 
 #endif //UDP_RTP_UDP_RTP_TS_H_

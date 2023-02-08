@@ -29,7 +29,7 @@ int parseTS(unsigned char* rtpPayload, TS_PACKET* tsPacket)
 
 	//查找荷载
 	//先跳过TS头
-	unsigned int payloadOffset = 4;
+	unsigned char payloadOffset = 4;
 
 	//有调节字段，跳过调节字段
 	if (tsPacket->adaptation_field_control == 3)
@@ -45,7 +45,7 @@ int parseTS(unsigned char* rtpPayload, TS_PACKET* tsPacket)
 	tsPacket->payload = rtpPayload + payloadOffset;
 
 	//荷载长度
-	tsPacket->payloadLen = 0;
+	tsPacket->payloadLen = 188 - payloadOffset;
 
 	return 0;
 }
@@ -53,55 +53,55 @@ int parseTS(unsigned char* rtpPayload, TS_PACKET* tsPacket)
 //判断PID是否时PMT
 //PMT在传送流中用于指示组成某一套节目的视频、音频和数据在传送流中的位置，即对应的TS包的PID值，以及每路节目的节目时钟参考（PCR）字段的位置
 
-int parsePES(unsigned char* payload, unsigned char type)
+int parsePES(unsigned char* payload, PES* pes)
 {
-	if (payload[3] != type)
-		return -1;
-
 	unsigned char* ptr = payload;
 
-	PES pes = { 0 };
-	pes.packet_start_code_prefix = (ptr[0] << 16) | (ptr[1] << 8) | ptr[2];
-	pes.stream_id = ptr[3];
-	pes.packet_length = (ptr[4] << 8) | ptr[5];
-
-	pes.reserved_0 = (ptr[6] & 0xc0) >> 6;
-	pes.scrambling_control = (ptr[6] & 0x30) >> 4;
-	pes.priority = (ptr[6] & 0x08) >> 3;
-	pes.data_alignment_indicator = (ptr[6] & 0x04) >> 2;
-	pes.copyright = (ptr[6] & 0x02) >> 1;
-	pes.original_or_copy = ptr[6] & 0x01;
-
-	pes.pts_dts_flags = (ptr[7] & 0xc0) >> 6;
-	pes.escr_flag = (ptr[7] & 0x20) >> 5;
-	pes.es_rate_flag = (ptr[7] & 0x10) >> 4;
-	pes.dsm_trick_mode_flag = (ptr[7] & 0x08) >> 3;
-	pes.additional_copy_info_flag = (ptr[7] & 0x04) >> 2;
-	pes.crc_flag = (ptr[7] & 0x02) >> 1;
-	pes.extension_flag = ptr[7] & 0x01;
-
-	pes.header_data_length = ptr[8];           /* 8 uimsbf*/
-	pes.payload_offset = 9 + pes.header_data_length;
-
-	if (pes.packet_start_code_prefix != 0x000001)
+	pes->packet_start_code_prefix = (ptr[0] << 16) | (ptr[1] << 8) | ptr[2];
+	if (pes->packet_start_code_prefix != 0x000001)
 	{
 		perror("not pes packet!!!");
 		return -1;
 	}
+	pes->stream_id = ptr[3];
+	pes->packet_length = (ptr[4] << 8) | ptr[5];
 
-	//移动一个PES长度
+	pes->reserved_0 = (ptr[6] & 0xc0) >> 6;
+	pes->scrambling_control = (ptr[6] & 0x30) >> 4;
+	pes->priority = (ptr[6] & 0x08) >> 3;
+	pes->data_alignment_indicator = (ptr[6] & 0x04) >> 2;
+	pes->copyright = (ptr[6] & 0x02) >> 1;
+	pes->original_or_copy = ptr[6] & 0x01;
+
+	pes->pts_dts_flags = (ptr[7] & 0xc0) >> 6;
+	pes->escr_flag = (ptr[7] & 0x20) >> 5;
+	pes->es_rate_flag = (ptr[7] & 0x10) >> 4;
+	pes->dsm_trick_mode_flag = (ptr[7] & 0x08) >> 3;
+	pes->additional_copy_info_flag = (ptr[7] & 0x04) >> 2;
+	pes->crc_flag = (ptr[7] & 0x02) >> 1;
+	pes->extension_flag = ptr[7] & 0x01;
+
+	pes->header_data_length = ptr[8];           /* 8 uimsbf*/
+	pes->payload_offset = 9 + pes->header_data_length;
+
+	//移动到任选字段
 	ptr += 9;
-
-	switch (pes.pts_dts_flags)
+	switch (pes->pts_dts_flags)
 	{
 	case 0x02:
-
+		pes->pts = (ptr[0] & 0x0E) << 30 | ptr[1] << 22 | (ptr[2] & 0xFE) << 15 | ptr[3] << 7 | (ptr[4] & 0xFE) >> 1;
+		pes->dts = 0;
 		break;
 	case 0x03:
+		pes->pts = (ptr[0] & 0x0E) << 30 | ptr[1] << 22 | (ptr[2] & 0xFE) << 15 | ptr[3] << 7 | (ptr[4] & 0xFE) >> 1;
+		ptr += 5;
+		pes->dts = (ptr[0] & 0x0E) << 30 | ptr[1] << 22 | (ptr[2] & 0xFE) << 15 | ptr[3] << 7 | (ptr[4] & 0xFE) >> 1;
 		break;
 	default:
-
+		pes->pts = 0;
+		pes->dts = 0;
 	}
+	return 0;
 }
 
 int parseSDT(TS_PACKET* tsPacket)
