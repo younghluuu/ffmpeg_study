@@ -7,3 +7,4 @@
 /udp-rtp/cmake-build-debug/
 /flv/cmake-build-debug/
 /ffmpeg_api/metadata_test/cmake-build-debug/
+/ffmpeg_api/decoder_api_test/cmake-build-debug/
