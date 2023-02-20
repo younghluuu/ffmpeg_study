@@ -3,7 +3,9 @@ project(decoder_api_test)
 
 set(CMAKE_CXX_STANDARD 11)
 
-add_executable(${PROJECT_NAME} main.cpp)
+aux_source_directory(. SRC_LIST)
+
+add_executable(${PROJECT_NAME} ${SRC_LIST})
 
 #FFmpeg的安装目录，msys2中安装的动态编译
 set(FFMPEG_DIR "D:/msys64/home/young/ffmpeg-n4.4.1/build64_shared")
