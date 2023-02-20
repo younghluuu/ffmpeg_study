@@ -41,12 +41,19 @@ static const char* outputTxt;
 static const char* outputVideo;
 static const char* outputYUV;
 static FILE* YUV_dst_file = nullptr;
+static const char* outputAudio;
+static const char* outputPCM;
+static FILE* PCM_dst_file = nullptr;
 
 static AVFormatContext* fmt_ctx = nullptr;
 static int video_stream_idx = -1;
-static AVCodecContext* video_dec_ctx = nullptr, * audio_dec_ctx = nullptr;
+static AVCodecContext* video_dec_ctx = nullptr;
 static int width, height;
 static AVPixelFormat pix_fmt;
+
+static int audio_stream_idx = -1;
+static AVCodecContext* audio_dec_ctx = nullptr;
+static AVStream* audio_stream;
 
 static AVFrame* frame = nullptr;
 static AVPacket* pkt = nullptr;
@@ -56,10 +63,10 @@ static int video_dst_linesize[4];
 static int video_dst_bufsize;
 
 static int video_frame_count = 0;
-int decode_packet(AVCodecContext* dec_ctx, AVPacket* pkt)
+int decode_packet(AVCodecContext* dec_ctx, AVPacket* avPacket)
 {
 	int ret = 0;
-	ret = avcodec_send_packet(dec_ctx, pkt);
+	ret = avcodec_send_packet(dec_ctx, avPacket);
 	if (ret < 0)
 	{
 		char* msg = (char*)malloc(100);
@@ -109,7 +116,8 @@ int decode_packet(AVCodecContext* dec_ctx, AVPacket* pkt)
 		}
 		else if (dec_ctx->codec->type == AVMEDIA_TYPE_AUDIO)
 		{
-
+			size_t unpadded_linesize = frame->nb_samples * av_get_bytes_per_sample(static_cast<AVSampleFormat>(frame->format));
+			fwrite(frame->extended_data[0], 1, unpadded_linesize, PCM_dst_file);
 		}
 
 		av_frame_unref(frame);
@@ -117,19 +125,63 @@ int decode_packet(AVCodecContext* dec_ctx, AVPacket* pkt)
 	return ret;
 }
 
+int open_dec_ctx(int* stream_idx, AVCodecContext** dec_ctx, AVMediaType mediaType)
+{
+	int ret = 0;
+	AVStream* stream;
+	AVCodec* dec;
+	AVDictionary* opts = nullptr;
+
+	ret = av_find_best_stream(fmt_ctx, mediaType, -1, -1, nullptr, 0);
+	if (ret < 0)
+	{
+		fprintf(stderr, "Could not find %s stream\n", av_get_media_type_string(mediaType));
+		return ret;
+	}
+	*stream_idx = ret;
+	stream = fmt_ctx->streams[*stream_idx];
+
+	//根据解码器ID找解码器
+	dec = avcodec_find_decoder(stream->codecpar->codec_id);
+	if (!dec)
+	{
+		fprintf(stderr, "Could not find %s decoder\n", av_get_media_type_string(mediaType));
+		return AVERROR(EINVAL);
+	}
+	//分配上下文对象  必须调用
+	*dec_ctx = avcodec_alloc_context3(dec);
+	if (!*dec_ctx)
+	{
+		fprintf(stderr, "Failed to allocate %s context\n", av_get_media_type_string(mediaType));
+		return AVERROR(ENOMEM);
+	}
+	//复制参数
+	ret = avcodec_parameters_to_context(*dec_ctx, stream->codecpar);
+	if (ret < 0)
+	{
+		fprintf(stderr, "Failed to copy %s codecpar to decoder context\n", av_get_media_type_string(mediaType));
+		return ret;
+	}
+	//根据编解码器初始化上下文
+	ret = avcodec_open2(*dec_ctx, dec, &opts);
+	if (ret < 0)
+	{
+		fprintf(stderr, "Failed to open %s codec\n", av_get_media_type_string(mediaType));
+		return ret;
+	}
+	return ret;
+}
+
 int main()
 {
-	MediaDemuxerCore mediaDemuxerCore;
-	mediaDemuxerCore.DemuxingVideo("", "");
 	in_filepath = "file:../video/Titanic.ts";
 	outputTxt = "output.txt";
 	outputVideo = "output.h264";
 	outputYUV = "output.yuv";
+	outputAudio = "output.aac";
+	outputPCM = "output.pcm";
 
-	AVCodec* video_dec = nullptr;
-
-	//网络功能
-	//avformat_network_init();
+	//网络功能 avformat_network_init();
 	//fmt_ctx = avformat_alloc_context(); 可以不调用这个
 	//打开输入流并 allocate AVFormatContext
 	int ret = avformat_open_input(&fmt_ctx, in_filepath, nullptr, nullptr);
@@ -145,74 +197,12 @@ int main()
 		perror("avformat_find_stream_info error");
 		return -1;
 	}
-	//找到video stream index
-	AVCodecParameters* video_codecpar = nullptr;
-	for (int i = 0; i < fmt_ctx->nb_streams; ++i)
-	{
-		if (fmt_ctx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO)
-		{
-			video_stream_idx = i;
-			video_codecpar = fmt_ctx->streams[i]->codecpar;
-			break;
-		}
-	}
-	if (video_stream_idx == -1)
-	{
-		perror("Didn't find video stream");
-		return -1;
-	}
 
-	//根据解码器ID找解码器
-	video_dec = avcodec_find_decoder(video_codecpar->codec_id);
-	if (!video_dec)
-	{
-		perror("video codec not found");
-		return -1;
-	}
-	//分配上下文对象  必须调用
-	video_dec_ctx = avcodec_alloc_context3(video_dec);
-	if (!video_dec_ctx)
-	{
-		perror("Could not allocate video codec context");
-		return -1;
-	}
-	ret = avcodec_parameters_to_context(video_dec_ctx, video_codecpar);
-	if (ret < 0)
-	{
-		perror("avcodec_parameters_to_context");
-		return -1;
-	}
-	//根据编解码器初始化上下文
-	ret = avcodec_open2(video_dec_ctx, video_dec, nullptr);
-	if (ret < 0)
-	{
-		perror("Could not open codec");
-		return -1;
-	}
+	//视频 AVCodecContext
+	open_dec_ctx(&video_stream_idx, &video_dec_ctx, AVMEDIA_TYPE_VIDEO);
 	width = video_dec_ctx->width;
 	height = video_dec_ctx->height;
 	pix_fmt = video_dec_ctx->pix_fmt;
-
-
-	//文件信息
-	FILE* txt = fopen(outputTxt, "w");
-	fprintf(txt, "duration:[%lld],bit_rate:[%lld]\n", fmt_ctx->duration, fmt_ctx->bit_rate);
-	fprintf(txt, "format:[%s],long format:[%s]\n", fmt_ctx->iformat->name, fmt_ctx->iformat->long_name);
-
-	fprintf(txt, "codec format:[%s],long format:[%s]\n", video_dec->name, video_dec->long_name);
-	fprintf(txt, "video width:[%d],height:[%d]\n", video_codecpar->width, video_codecpar->height);
-	fprintf(txt,
-		"pix format:[%s], pic width:[%d],height:[%d]\n",
-		av_get_pix_fmt_name(video_dec_ctx->pix_fmt),
-		video_dec_ctx->width,
-		video_dec_ctx->height);
-	fclose(txt);
-
-
-	//转储信息到标准输出
-	av_dump_format(fmt_ctx, 0, in_filepath, 0);
-
-	//视频文件
 	//分配图像，以后用来放置解码出来的图像
 	video_dst_bufsize = av_image_alloc(video_dst_data,
 		video_dst_linesize,
@@ -226,6 +216,30 @@ int main()
 		return -1;
 	}
 	YUV_dst_file = fopen(outputYUV, "wb");
+
+	//音频 AVCodecContext
+	open_dec_ctx(&audio_stream_idx, &audio_dec_ctx, AVMEDIA_TYPE_AUDIO);
+	PCM_dst_file = fopen(outputPCM, "wb");
+	audio_stream = fmt_ctx->streams[audio_stream_idx];
+
+	//转储信息到标准输出
+	av_dump_format(fmt_ctx, 0, in_filepath, 0);
+
+	//文件信息
+	FILE* txt = fopen(outputTxt, "w");
+	fprintf(txt, "duration:[%lld],bit_rate:[%lld]\n", fmt_ctx->duration, fmt_ctx->bit_rate);
+	fprintf(txt, "format:[%s],long format:[%s]\n", fmt_ctx->iformat->name, fmt_ctx->iformat->long_name);
+	fprintf(txt, "codec format:[%s],long format:[%s]\n", video_dec_ctx->codec->name, video_dec_ctx->codec->long_name);
+	fprintf(txt,
+		"video width:[%d],height:[%d]\n",
+		fmt_ctx->streams[video_stream_idx]->codecpar->width,
+		fmt_ctx->streams[video_stream_idx]->codecpar->height);
+	fprintf(txt,
+		"pix format:[%s], pic width:[%d],height:[%d]\n",
+		av_get_pix_fmt_name(video_dec_ctx->pix_fmt),
+		video_dec_ctx->width,
+		video_dec_ctx->height);
+	fclose(txt);
 
 	frame = av_frame_alloc();
 	if (!frame)
@@ -262,16 +276,26 @@ int main()
 			fwrite(pkt->data, 1, pkt->size, video_fp);
 			decode_packet(video_dec_ctx, pkt);
 		}
+		else if (pkt->stream_index == audio_stream_idx)
+		{
+			decode_packet(audio_dec_ctx, pkt);
+		}
 
 		av_packet_unref(pkt);
 	}
 
 	//flush
-	decode_packet(video_dec_ctx, NULL);
+	decode_packet(video_dec_ctx, nullptr);
 
 	av_freep(video_dst_data);
 	av_frame_free(&frame);
 	avcodec_free_context(&video_dec_ctx);
 	avformat_close_input(&fmt_ctx);
 	return 0;
+}
+
+int main2()
+{
+	MediaDemuxerCore mediaDemuxerCore;
+	mediaDemuxerCore.Demuxing("file:../video/Titanic.ts", "output.h264");
 }

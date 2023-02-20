@@ -4,7 +4,7 @@
 
 #include "MediaDemuxerCore.h"
 
-int MediaDemuxerCore::DemuxingVideo(const std::string& media_path, const std::string& output_video)
+int MediaDemuxerCore::Demuxing(const std::string& media_path, const std::string& output_video)
 {
 	fmt_ctx = avformat_alloc_context();
 	int ret = avformat_open_input(&fmt_ctx, media_path.c_str(), nullptr, nullptr);
@@ -37,7 +37,7 @@ int MediaDemuxerCore::DemuxingVideo(const std::string& media_path, const std::st
 	}
 
 	av_dump_format(fmt_ctx, video_stream_idx, media_path.c_str(), 0);
-	FILE* h264_out = fopen(output_video.c_str(), "wb");
+	h264_out = fopen(output_video.c_str(), "wb");
 	if (h264_out == nullptr)
 	{
 		perror("open outputVideo fail");
@@ -58,23 +58,82 @@ int MediaDemuxerCore::DemuxingVideo(const std::string& media_path, const std::st
 		if (pkt->stream_index == video_stream_idx)
 		{
 			printf("num:[%d], write h264 size:[%d]\n", cnt++, pkt->size);
-			//添加start code
-			const AVBitStreamFilter* bsfilter = av_bsf_get_by_name("h264_mp4toannexb");
-
+			dec_paket(pkt);
 		}
 
 		//减少引用计数
 		av_packet_unref(pkt);
 	}
 
+	//flush
+	dec_paket(nullptr);
+
+	fclose(h264_out);
+	av_packet_free(&pkt);
+	av_bsf_free(&bsf_ctx);
 	avformat_close_input(&fmt_ctx);
 	return 0;
 }
+
 void MediaDemuxerCore::init_h264_mp4toannexb(AVCodecParameters* avCodecParameters)
 {
 	if (bsf_ctx == nullptr)
 	{
 		const AVBitStreamFilter* avBitStreamFilter = av_bsf_get_by_name("h264_mp4toannexb");
+		//分配上下文
+		int ret = av_bsf_alloc(avBitStreamFilter, &bsf_ctx);
+		if (ret < 0)
+		{
+			perror("Error alloc bsf_ctx ");
+			return;
+		}
+		//复制解码器属性
+		ret = avcodec_parameters_copy(bsf_ctx->par_in, avCodecParameters);
+		if (ret < 0)
+		{
+			perror("Error copy codecpar");
+			return;
+		}
+		av_bsf_init(bsf_ctx);
 	}
 }
 
+int MediaDemuxerCore::dec_paket(AVPacket* avPacket)
+{
+	int ret = 0;
+	char errMsg[AV_ERROR_MAX_STRING_SIZE];
+	//添加start code
+	init_h264_mp4toannexb(fmt_ctx->streams[video_stream_idx]->codecpar);
+
+	ret = av_bsf_send_packet(bsf_ctx, avPacket);
+	if (ret < 0)
+	{
+		av_strerror(ret, errMsg, AV_ERROR_MAX_STRING_SIZE);
+		fprintf(stderr, "Error submitting a packet to bsf decoding (%s)\n", errMsg);
+		//return -1;
+		return ret;    //annexb 可能需要更多的包
+	}
+
+	while (ret >= 0)
+	{
+		ret = av_bsf_receive_packet(bsf_ctx, avPacket);
+		if (ret < 0)
+		{
+			//正常结束
+			if (ret == AVERROR_EOF || ret == AVERROR(EAGAIN))
+				return 0;
+
+			//错误
+			av_strerror(ret, errMsg, AV_ERROR_MAX_STRING_SIZE);
+			fprintf(stderr, "Error submitting a packet to bsf decoding (%s)\n", errMsg);
+			return ret;
+		}
+		fwrite(avPacket->data, 1, avPacket->size, h264_out);
+	}
+	return ret;
+}
+
+MediaDemuxerCore::~MediaDemuxerCore()
+{
+
+}
