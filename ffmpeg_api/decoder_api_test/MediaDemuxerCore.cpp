@@ -4,10 +4,20 @@
 
 #include "MediaDemuxerCore.h"
 
-int MediaDemuxerCore::Demuxing(const std::string& media_path, const std::string& output_video)
+MediaDemuxerCore::~MediaDemuxerCore()
+{
+
+}
+int MediaDemuxerCore::Demuxing(const std::string& media_path,
+	const std::string& output_video,
+	const std::string& output_audio)
 {
 	fmt_ctx = avformat_alloc_context();
-	int ret = avformat_open_input(&fmt_ctx, media_path.c_str(), nullptr, nullptr);
+	pkt = av_packet_alloc();
+	int cnt = 0;
+	int ret = 0;
+
+	ret = avformat_open_input(&fmt_ctx, media_path.c_str(), nullptr, nullptr);
 	if (ret < 0)
 	{
 		perror("Error avformat_open_input");
@@ -37,28 +47,37 @@ int MediaDemuxerCore::Demuxing(const std::string& media_path, const std::string&
 	}
 
 	av_dump_format(fmt_ctx, video_stream_idx, media_path.c_str(), 0);
+	av_dump_format(fmt_ctx, audio_stream_idx, media_path.c_str(), 0);
 	h264_out = fopen(output_video.c_str(), "wb");
 	if (h264_out == nullptr)
 	{
 		perror("open outputVideo fail");
 		return -1;
 	}
+	audio_out = fopen(output_audio.c_str(), "wb");
+	if (audio_out == nullptr)
+	{
+		perror("open output_audio fail");
+		return -1;
+	}
 
-	pkt = av_packet_alloc();
-	int cnt = 0;
 	while (true)
 	{
 		ret = av_read_frame(fmt_ctx, pkt);
 		if (ret < 0)
 		{
-			printf("video read over\n");
+			printf("read over\n");
 			break;
 		}
 
 		if (pkt->stream_index == video_stream_idx)
 		{
 			printf("num:[%d], write h264 size:[%d]\n", cnt++, pkt->size);
-			dec_paket(pkt);
+			video_dec_packet(pkt);
+		}
+		else if (pkt->stream_index == audio_stream_idx)
+		{
+			audio_dec_packet(pkt);
 		}
 
 		//减少引用计数
@@ -66,7 +85,8 @@ int MediaDemuxerCore::Demuxing(const std::string& media_path, const std::string&
 	}
 
 	//flush
-	dec_paket(nullptr);
+	video_dec_packet(nullptr);
+	audio_dec_packet(nullptr);
 
 	fclose(h264_out);
 	av_packet_free(&pkt);
@@ -98,7 +118,7 @@ void MediaDemuxerCore::init_h264_mp4toannexb(AVCodecParameters* avCodecParameter
 	}
 }
 
-int MediaDemuxerCore::dec_paket(AVPacket* avPacket)
+int MediaDemuxerCore::video_dec_packet(AVPacket* avPacket)
 {
 	int ret = 0;
 	char errMsg[AV_ERROR_MAX_STRING_SIZE];
@@ -114,7 +134,7 @@ int MediaDemuxerCore::dec_paket(AVPacket* avPacket)
 		return ret;    //annexb 可能需要更多的包
 	}
 
-	while (ret >= 0)
+	while (true)
 	{
 		ret = av_bsf_receive_packet(bsf_ctx, avPacket);
 		if (ret < 0)
@@ -130,10 +150,15 @@ int MediaDemuxerCore::dec_paket(AVPacket* avPacket)
 		}
 		fwrite(avPacket->data, 1, avPacket->size, h264_out);
 	}
-	return ret;
 }
 
-MediaDemuxerCore::~MediaDemuxerCore()
+int MediaDemuxerCore::audio_dec_packet(AVPacket* avPacket)
 {
+	int ret = 0;
+	char errMsg[AV_ERROR_MAX_STRING_SIZE];
 
+	//拼接ADTS头
+	char adts_header_buf[7] = { 0 };
+
+	return 0;
 }

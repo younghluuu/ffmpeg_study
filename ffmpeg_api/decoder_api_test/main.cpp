@@ -267,7 +267,7 @@ int main()
 		int rect = av_read_frame(fmt_ctx, pkt);
 		if (rect < 0)
 		{
-			printf("video read over\n");
+			printf("read over\n");
 			break;
 		}
 		if (pkt->stream_index == video_stream_idx)
