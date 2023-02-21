@@ -3,6 +3,7 @@
 //
 
 #include "MediaDemuxerCore.h"
+#include "ADTS.h"
 
 MediaDemuxerCore::~MediaDemuxerCore()
 {
@@ -14,7 +15,8 @@ int MediaDemuxerCore::Demuxing(const std::string& media_path,
 {
 	fmt_ctx = avformat_alloc_context();
 	pkt = av_packet_alloc();
-	int cnt = 0;
+	int Vcnt = 0;
+	int Acnt = 0;
 	int ret = 0;
 
 	ret = avformat_open_input(&fmt_ctx, media_path.c_str(), nullptr, nullptr);
@@ -61,6 +63,20 @@ int MediaDemuxerCore::Demuxing(const std::string& media_path,
 		return -1;
 	}
 
+	printf("audio time:[%f]\n",
+		fmt_ctx->streams[audio_stream_idx]->duration * av_q2d(fmt_ctx->streams[audio_stream_idx]->time_base));
+	AVFormatContext* audio_output_fmt = avformat_alloc_context();
+	audio_output_fmt->oformat = av_guess_format(nullptr, output_audio.c_str(), nullptr);
+	AVStream* aac_stream = avformat_new_stream(audio_output_fmt, nullptr);
+	avcodec_parameters_copy(aac_stream->codecpar, fmt_ctx->streams[audio_stream_idx]->codecpar);
+	ret = avio_open(&audio_output_fmt->pb, output_audio.c_str(), AVIO_FLAG_WRITE);
+	if (ret < 0)
+	{
+		perror("Error avio_open output audio");
+		return -1;
+	}
+	avformat_write_header(audio_output_fmt, nullptr);
+
 	while (true)
 	{
 		ret = av_read_frame(fmt_ctx, pkt);
@@ -72,12 +88,14 @@ int MediaDemuxerCore::Demuxing(const std::string& media_path,
 
 		if (pkt->stream_index == video_stream_idx)
 		{
-			printf("num:[%d], write h264 size:[%d]\n", cnt++, pkt->size);
+			printf("num:[%d], write h264 size:[%d]\n", Vcnt++, pkt->size);
 			video_dec_packet(pkt);
 		}
 		else if (pkt->stream_index == audio_stream_idx)
 		{
-			audio_dec_packet(pkt);
+			printf("num:[%d], write audio size:[%d]\n", Acnt++, pkt->size);
+			//audio_dec_packet(pkt);
+			audio_dec_packet_stream(pkt, aac_stream, audio_output_fmt);
 		}
 
 		//减少引用计数
@@ -86,8 +104,10 @@ int MediaDemuxerCore::Demuxing(const std::string& media_path,
 
 	//flush
 	video_dec_packet(nullptr);
-	audio_dec_packet(nullptr);
+	//audio_dec_packet(nullptr);	没有走codec io 不需要排水
 
+	av_write_trailer(audio_output_fmt);
+	avformat_free_context(audio_output_fmt);
 	fclose(h264_out);
 	av_packet_free(&pkt);
 	av_bsf_free(&bsf_ctx);
@@ -156,9 +176,38 @@ int MediaDemuxerCore::audio_dec_packet(AVPacket* avPacket)
 {
 	int ret = 0;
 	char errMsg[AV_ERROR_MAX_STRING_SIZE];
+	AVStream* stream = fmt_ctx->streams[audio_stream_idx];
+	int adtsId = 0;
+	if (stream->codecpar->codec_id == AV_CODEC_ID_MP3)
+		adtsId = 1;
 
-	//拼接ADTS头
-	char adts_header_buf[7] = { 0 };
-
+	if (strcmp(fmt_ctx->iformat->name, "mpegts") != 0)
+	{
+		//拼接ADTS头
+		ADTS adts(stream->codecpar->profile,
+			adtsId,
+			stream->codecpar->sample_rate,
+			stream->codecpar->channels,
+			avPacket->size);
+		fwrite(&adts, 1, 7, audio_out);
+	}
+	fwrite(avPacket->data, 1, avPacket->size, audio_out);
 	return 0;
+}
+
+int MediaDemuxerCore::audio_dec_packet_stream(AVPacket* avPacket, AVStream* pStream, AVFormatContext* pContext)
+{
+	avPacket->stream_index = pStream->index;
+	//time base
+	av_packet_rescale_ts(avPacket, fmt_ctx->streams[audio_stream_idx]->time_base, pStream->time_base);
+	int ret = av_write_frame(pContext, avPacket);
+	if (ret < 0)
+	{
+		printf("write audio failed\n");
+	}
+	return 0;
+}
+void MediaDemuxerCore::init_muxing_audio()
+{
+
 }

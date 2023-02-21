@@ -116,7 +116,8 @@ int decode_packet(AVCodecContext* dec_ctx, AVPacket* avPacket)
 		}
 		else if (dec_ctx->codec->type == AVMEDIA_TYPE_AUDIO)
 		{
-			size_t unpadded_linesize = frame->nb_samples * av_get_bytes_per_sample(static_cast<AVSampleFormat>(frame->format));
+			size_t unpadded_linesize =
+				frame->nb_samples * av_get_bytes_per_sample(static_cast<AVSampleFormat>(frame->format));
 			fwrite(frame->extended_data[0], 1, unpadded_linesize, PCM_dst_file);
 		}
 
@@ -172,7 +173,7 @@ int open_dec_ctx(int* stream_idx, AVCodecContext** dec_ctx, AVMediaType mediaTyp
 	return ret;
 }
 
-int main()
+int main1()
 {
 	in_filepath = "file:../video/Titanic.ts";
 	outputTxt = "output.txt";
@@ -294,8 +295,8 @@ int main()
 	return 0;
 }
 
-int main2()
+int main()
 {
 	MediaDemuxerCore mediaDemuxerCore;
-	mediaDemuxerCore.Demuxing("file:../video/Titanic.ts", "output.h264");
+	mediaDemuxerCore.Demuxing("file:../video/Titanic.ts", "output.h264", "output.aac");
 }
