@@ -8,3 +8,4 @@
 /flv/cmake-build-debug/
 /ffmpeg_api/metadata_test/cmake-build-debug/
 /ffmpeg_api/decoder_api_test/cmake-build-debug/
+/ffmpeg_example/remuxing/cmake-build-debug/
